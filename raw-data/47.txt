@@ -1,0 +1,7 @@
+Guaranteed returns on transactions
+inShare
+Bookmark and Share
+The HSBC case
+
+The question which arose in HSBC Life (UK) Ltd v Stubbs (SpC 295) was whether equity derivatives purchased by insurance companies to back guaranteed investment bonds sold to investors fell to be taxed under the capital gains tax rules in Taxation of Chargeable Gains Act 1992 (TCGA), or under the corporate debt rules contained in the loan relationship provisions of Finance Act (FA) 1996. The policy of the financial instruments legislation in FA 1994, and loan relationships legislation in FA 1996, is to bring into income taxation profits on debt and debt-based products, while leaving gains on shares and equity-linked instruments within the capital gains rules. The divergence between the income and capital gains treatment of such profits had already been successfully arbitraged by the bank in Griffin v Citibank Investments [2000] STC 1010. In HSBC the gain in question was on an equity-linked instrument. As in Citibank the Revenue raised the argument that because the financial return mirrored that on a zero coupon bond, taxation was imposed by the loan relationship rules. Thus HSBC was essentially a re-run of Citibank.
+
