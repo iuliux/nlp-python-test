@@ -1,11 +1,25 @@
-import os, fnmatch, nltk, random, sys, re, time
-from parser import Parser
+import os, fnmatch, nltk, random, re
+from itertools import chain
+from parser import ParseMultiJob
 
 VERBOSE = True
+CACHE_DIR = "./json-cache"
+N_SERVERS = 2  # Set to 1 for no parallelization
 
 def debug(msg):
     if VERBOSE:
         print msg
+
+def _chunkList(seq, num):
+    '''Splits list into @num aprox. equal chunks'''
+    avg = len(seq) / float(num)
+    out = []
+    last = 0.0
+    while last < len(seq):
+        out.append(seq[int(last):int(last + avg)])
+        last += avg
+    return out
+
 
 def findFiles(path, filter):
     for root, dirs, files in os.walk(path):
@@ -17,10 +31,33 @@ def findAttr(words, type, attribute):
         val = w[1][type]
         if val == attribute:
             return True
-            
-def extractFeatures(text, file):
-    fileName = file.split('/')[2]
 
+def parse_datasets(cnkd_trainData, cnkd_devTestData, cnkd_testData):
+    # Create parsing jobs
+    train_parse_threads = \
+            [ParseMultiJob(CACHE_DIR, cnkd_trainData[srv_idx], server=srv_idx)
+                for srv_idx in range(N_SERVERS)]
+    devTest_parse_threads = \
+            [ParseMultiJob(CACHE_DIR, cnkd_devTestData[srv_idx], server=srv_idx)
+                for srv_idx in range(N_SERVERS)]
+    test_parse_threads = \
+            [ParseMultiJob(CACHE_DIR, cnkd_testData[srv_idx], server=srv_idx)
+                for srv_idx in range(N_SERVERS)]
+    # Start all jobs
+    [job.start() for job in train_parse_threads]  # Start jobs
+    [job.join() for job in train_parse_threads]  # Wait for jobs to finish
+    [job.start() for job in devTest_parse_threads]  # Start jobs
+    [job.join() for job in devTest_parse_threads]  # Wait for jobs to finish
+    [job.start() for job in test_parse_threads]  # Start jobs
+    [job.join() for job in test_parse_threads]  # Wait for jobs to finish
+    # Collect results
+    train_results = list(chain.from_iterable([job.nlpResults for job in train_parse_threads]))
+    devTest_results = list(chain.from_iterable([job.nlpResults for job in devTest_parse_threads]))
+    test_results = list(chain.from_iterable([job.nlpResults for job in test_parse_threads]))
+
+    return train_results, devTest_results, test_results
+
+def extractFeatures(parsed):
     features = {#Is the word <guarantee> negated?
                 'guaranteeHasNegation':False, 
                 #Is there "Low risk" or "No risk" near <guarantee> (a few words away / in the same sentence)?
@@ -35,62 +72,50 @@ def extractFeatures(text, file):
                 'guaranteeInvestmentOrIncome':False,
                 #If the word <guaranteed> appears with the word capital
                 'guaranteeCapital':False,
-                
                 }
     
-    #debug("Processing %s" % file)
-    try:
-        p = Parser("./json-cache");
-        nlpResult = p.parse(fileName, text)
+    #look for the lemma "guarantee" or "guaranteed"
+    for (s) in parsed['sentences']:
+        #print s['words']
+        #print s['parsetree']
+        #print s['dependencies']
+        #print s['text']
         
-        #look for the lemma "guarantee" or "guaranteed"
-        for (s) in nlpResult['sentences']:
-            #print s['words']
-            #print s['parsetree']
-            #print s['dependencies']
-            #print s['text']
+        hasGuarantee = False
+        #look for trigger words
+        for (w) in s['words']:
+            lemma = w[1]['Lemma']
+            if lemma == 'guarantee' or lemma == 'guaranteed':
+                hasGuarantee = True
+                break
+                
+        if hasGuarantee:
+            #look for negation
+            negations = ['no', 'not', 'isn\'t', 'nothing', 'neither', 'nor']
+            if re.search(r'\\b' + '\\b|\\b'.join(negations) + '\\b', s['text'], re.IGNORECASE) != None:
+                features['guaranteeHasNegation'] = True                        
             
-            hasGuarantee = False
-            #look for trigger words
+            #check for percentage
+            if re.search(r'%', s['text']) != None:
+                features['guaranteePercentage'] = True                        
+            
+            #check for low risk
+            if re.search(r'low risk|no risk', s['text'], re.IGNORECASE) != None:
+                features['guaranteeLowRisk'] = True
+        
             for (w) in s['words']:
                 lemma = w[1]['Lemma']
-                if lemma == 'guarantee' or lemma == 'guaranteed':
-                    hasGuarantee = True
-                    break
+                if lemma == 'our' or lemma == 'we':
+                    features['guaranteeOur'] = True
                     
-            if hasGuarantee:
-                #look for negation
-                negations = ['no', 'not', 'isn\'t', 'nothing', 'neither', 'nor']
-                if re.search(r'\\b' + '\\b|\\b'.join(negations) + '\\b', s['text'], re.IGNORECASE) != None:
-                    features['guaranteeHasNegation'] = True                        
-                
-                #check for percentage
-                if re.search(r'%', s['text']) != None:
-                    features['guaranteePercentage'] = True                        
-                
-                #check for low risk
-                if re.search(r'low risk|no risk', s['text'], re.IGNORECASE) != None:
-                    features['guaranteeLowRisk'] = True
-            
-                for (w) in s['words']:
-                    lemma = w[1]['Lemma']
-                    if lemma == 'our' or lemma == 'we':
-                        features['guaranteeOur'] = True
-                        
-                    if lemma == 'return':
-                        features['guaranteeReturn'] = True                        
-                        
-                    if lemma == 'investment' or lemma == 'income':
-                        features['guaranteeInvestmentOrIncome'] = True
-                        
-                    if lemma == 'capital':
-                        features['guaranteeCapital'] = True                        
-                        
-    except Exception: 
-        print " ===== ERROR ====="
-        print sys.exc_info()
-        return features
-    
+                if lemma == 'return':
+                    features['guaranteeReturn'] = True                        
+                    
+                if lemma == 'investment' or lemma == 'income':
+                    features['guaranteeInvestmentOrIncome'] = True
+                    
+                if lemma == 'capital':
+                    features['guaranteeCapital'] = True                        
     return features
             
 #read in raw content
@@ -111,12 +136,22 @@ devData = rawData[size:]
 random.shuffle(devData)
 devTestData = devData[:size]
 trainData = devData[size:]
-        
-trainSet = [(extractFeatures(n, f), g) for (n,g,f) in trainData]
-devTestSet = [(extractFeatures(n, f), g) for (n,g,f) in devTestData]
-testSet = [(extractFeatures(n, f), g) for (n,g,f) in testData]        
 
-#print trainSet
+# Chunk data to be processed on multiple servers
+cnkd_trainData = _chunkList(trainData, N_SERVERS)
+cnkd_devTestData = _chunkList(devTestData, N_SERVERS)
+cnkd_testData = _chunkList(testData, N_SERVERS)
+
+# Parse datasets
+train_results, devTest_results, test_results = \
+    parse_datasets(cnkd_trainData, cnkd_devTestData, cnkd_testData)
+
+# Extract features
+trainSet = [(extractFeatures(parsed), g) for (parsed, g, f) in train_results]
+devTestSet = [(extractFeatures(parsed), g) for (parsed, g, f) in devTest_results]
+testSet = [(extractFeatures(parsed), g) for (parsed, g, f) in test_results]
+
+# # print trainSet
 print "Raw items %d / Train items %d / Dev items %d / Test items %d \n" % (len(rawData), len(trainSet), len(devTestSet), len(testSet))
 
 
@@ -128,14 +163,13 @@ print "Accuracy " + str(nltk.classify.accuracy(nb_classifier, devTestSet))
 # Test against the dev set, so that we can refine our features
 errors = []
 debug ("\n ===== TEST RESULTS =====")
-for (text, label, file) in devTestData:
+for (text, label, fname) in devTest_results:
     #print file + " - " + label
-    guess = nb_classifier.classify(extractFeatures(text, file))
-    content = open(file, 'r').read()
+    guess = nb_classifier.classify(extractFeatures(text))
         
     if guess != label:
-        errors.append( (label, guess, f) )
-        debug("correct=%-8s guess=%-8s file=%-30s" % (label, guess, file))
+        errors.append( (label, guess) )
+        debug("correct=%-8s guess=%-8s file=%-30s" % (label, guess, fname))
     
 debug ("Errors: %d \n" % (len(errors)))
 
@@ -149,13 +183,12 @@ print "DecisionTreeClassifier Accuracy " + str(nltk.classify.accuracy(dt_classif
 # Test against the dev set, so that we can refine our features
 errors = []
 debug ("\n ===== TEST RESULTS =====")
-for (text, label, file) in devTestData:
+for (text, label, fname) in devTest_results:
     #print file + " - " + label
-    guess = dt_classifier.classify(extractFeatures(text, file))
-    content = open(file, 'r').read()
+    guess = dt_classifier.classify(extractFeatures(text))
         
     if guess != label:
-        errors.append( (label, guess, f) )
-        debug("correct=%-8s guess=%-8s file=%-30s" % (label, guess, file))
+        errors.append( (label, guess) )
+        debug("correct=%-8s guess=%-8s file=%-30s" % (label, guess, fname))
     
 debug ("Errors: %d \n" % (len(errors)))
